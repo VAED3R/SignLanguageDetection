@@ -300,11 +300,17 @@ class HandTracker:
         def fist(f):
             return len(f) == 5 and not any(f)
 
+        def thumb_index_middle(f):
+            return len(f) == 5 and f[0] and f[1] and f[2] and not f[3] and not f[4]
+
         if all(index_only(f) for f in all_fingers[:2]):
             return "My"
 
         if all(index_and_pinky(f) for f in all_fingers[:2]):
             return "Good"
+
+        if all(thumb_index_middle(f) for f in all_fingers[:2]):
+            return "Need"
 
         if all(fist(f) for f in all_fingers[:2]):
             return "."
