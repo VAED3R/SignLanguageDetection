@@ -8,6 +8,14 @@ import mediapipe as mp
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 
+try:
+    import pygame
+    pygame.mixer.pre_init(44100, -16, 2, 512)
+    pygame.mixer.init()
+    _PYGAME_AVAILABLE = True
+except ImportError:
+    _PYGAME_AVAILABLE = False
+
 MODEL_PATH = "hand_landmarker.task"
 MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/"
@@ -23,6 +31,17 @@ HAND_CONNECTIONS = [
     (13, 17), (17, 18), (18, 19), (19, 20),   # Pinky
     (0, 17),                                   # Palm base
 ]
+
+
+def play_fah():
+    """Play fah.mp3 as a non-blocking sound effect."""
+    if not _PYGAME_AVAILABLE:
+        return
+    try:
+        pygame.mixer.music.load(os.path.join("assets", "fah.mp3"))
+        pygame.mixer.music.play()
+    except Exception:
+        pass
 
 
 class HandTracker:
@@ -243,18 +262,22 @@ class HandTracker:
         if not T and I and not M and not R and P:
             return "Thank You"
 
+        if T and I and not M and not R and P:
+            return "I Love You"
+
         if not T and not I and M and not R and not P:
             if landmark_list and self.is_back_palm(landmark_list):
-                return "."
+                return "_fah_"
 
         return ""  # Unknown / unrecognized gesture
 
-    def recognize_gesture_multi(self, all_fingers):
+    def recognize_gesture_multi(self, all_fingers, all_landmarks=None):
         """
         Recognize gestures that require both hands.
 
         Args:
-            all_fingers: List of fingers_up() results for each detected hand.
+            all_fingers:   List of fingers_up() results for each detected hand.
+            all_landmarks: Optional list of find_positions() results per hand.
 
         Returns:
             Gesture label string, or empty string if unrecognized.
@@ -271,8 +294,20 @@ class HandTracker:
         def index_only(f):
             return len(f) == 5 and not f[0] and f[1] and not f[2] and not f[3] and not f[4]
 
+        def index_and_pinky(f):
+            return len(f) == 5 and not f[0] and f[1] and not f[2] and not f[3] and f[4]
+
+        def fist(f):
+            return len(f) == 5 and not any(f)
+
         if all(index_only(f) for f in all_fingers[:2]):
             return "My"
+
+        if all(index_and_pinky(f) for f in all_fingers[:2]):
+            return "Good"
+
+        if all(fist(f) for f in all_fingers[:2]):
+            return "."
 
         if all(thumbs_up(f) for f in all_fingers[:2]):
             return "Like"
@@ -281,7 +316,14 @@ class HandTracker:
         if any(thumbs_up(f) for f in hands) and any(open_palm(f) for f in hands):
             return "Help"
 
+        if any(open_palm(f) for f in hands) and any(index_only(f) for f in hands):
+            return "Is"
+
         if all(open_palm(f) for f in all_fingers[:2]):
+            # Two open palms dorsal → Want; two open palms facing → Clear
+            if all_landmarks and len(all_landmarks) >= 2:
+                if all(self.is_back_palm(lm) for lm in all_landmarks[:2]):
+                    return "Want"
             return "Clear"
 
         return ""
@@ -407,15 +449,17 @@ def main():
         if tracker.results and tracker.results.hand_landmarks:
             num_hands = len(tracker.results.hand_landmarks)
             all_fingers = []
+            all_landmarks = []
             for i in range(num_hands):
                 landmark_list = tracker.find_positions(frame, hand_index=i, draw=False)
                 fingers = tracker.fingers_up(landmark_list)
                 hand_label = tracker.get_hand_label(hand_index=i)
                 if fingers:
                     all_fingers.append(fingers)
+                    all_landmarks.append(landmark_list)
                     draw_finger_status(frame, fingers, hand_label, i, frame_width)
 
-            detected_gesture = tracker.recognize_gesture_multi(all_fingers)
+            detected_gesture = tracker.recognize_gesture_multi(all_fingers, all_landmarks)
             if not detected_gesture and len(all_fingers) == 1:
                 lm_list = tracker.find_positions(frame, hand_index=0, draw=False)
                 detected_gesture = tracker.recognize_gesture(all_fingers[0], lm_list)
@@ -448,12 +492,14 @@ def main():
                     flash_sentence = ["[Cleared]"]
                     flash_until = curr_time + 1.5
                     print("Sentence cleared.")
+                elif detected_gesture == "_fah_":
+                    play_fah()
                 else:
                     # Add word only if not already in this sentence
                     if detected_gesture not in sentence:
                         sentence.append(detected_gesture)
 
-        draw_gesture_label(frame, detected_gesture, frame_width, frame_height)
+        draw_gesture_label(frame, "" if detected_gesture == "_fah_" else detected_gesture, frame_width, frame_height)
 
         # Show completed sentence flash or building sentence
         if curr_time < flash_until:
