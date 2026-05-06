@@ -578,8 +578,8 @@ def main():
                     flash_sentence = ["[Cleared]"]
                     flash_until = curr_time + 1.5
                     print("Sentence cleared.")
-                elif detected_gesture == "_fah_":
-                    play_fah()
+                # elif detected_gesture == "_fah_":
+                #     play_fah()
                 else:
                     # Add word only if not already in this sentence
                     if detected_gesture not in sentence:
