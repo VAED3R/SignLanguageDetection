@@ -4,6 +4,7 @@ import urllib.request
 
 import cv2
 from tts import speak
+from speech_to_text import SpeechToTextManager
 import mediapipe as mp
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
@@ -31,6 +32,34 @@ HAND_CONNECTIONS = [
     (13, 17), (17, 18), (18, 19), (19, 20),   # Pinky
     (0, 17),                                   # Palm base
 ]
+
+UI_THEME = {
+    "glass": (24, 20, 16),
+    "glass_alt": (32, 26, 22),
+    "text_primary": (245, 245, 245),
+    "text_dim": (185, 185, 185),
+    "accent": (70, 220, 255),
+    "success": (90, 235, 140),
+    "danger": (90, 95, 255),
+    "warning": (80, 210, 255),
+}
+
+
+def draw_glass_panel(frame, x1, y1, x2, y2, color, alpha=0.5):
+    """Draw a semi-transparent panel clipped to frame bounds."""
+    h, w = frame.shape[:2]
+    x1 = max(0, min(w - 1, x1))
+    y1 = max(0, min(h - 1, y1))
+    x2 = max(1, min(w, x2))
+    y2 = max(1, min(h, y2))
+    if x2 <= x1 or y2 <= y1:
+        return
+
+    roi = frame[y1:y2, x1:x2]
+    overlay = roi.copy()
+    overlay[:] = color
+    cv2.addWeighted(overlay, alpha, roi, 1 - alpha, 0, roi)
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (70, 70, 70), 1)
 
 
 def play_fah():
@@ -336,46 +365,52 @@ class HandTracker:
 
 
 def draw_fps(frame, fps):
-    cv2.putText(
-        frame, f"FPS: {int(fps)}", (10, 30),
-        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
-    )
+    draw_glass_panel(frame, 12, 12, 150, 52, UI_THEME["glass"], alpha=0.55)
+    cv2.putText(frame, f"FPS {int(fps):02d}", (24, 41),
+                cv2.FONT_HERSHEY_DUPLEX, 0.72, UI_THEME["success"], 2)
 
 
 def draw_finger_status(frame, fingers, hand_label, hand_index, frame_width):
     """Render per-hand finger status on screen."""
     names = ["Thumb", "Index", "Middle", "Ring", "Pinky"]
-    x_offset = 10 if hand_index == 0 else frame_width // 2
-    y_start = 70
+    panel_w = 260
+    panel_h = 180
+    margin = 12
+    x_offset = margin if hand_index == 0 else frame_width - panel_w - margin
+    y_start = 66
 
-    label_text = f"Hand {hand_index + 1}: {hand_label or 'Unknown'}"
-    cv2.putText(frame, label_text, (x_offset, y_start - 10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+    draw_glass_panel(frame, x_offset, y_start, x_offset + panel_w, y_start + panel_h,
+                     UI_THEME["glass"], alpha=0.5)
+
+    label_text = f"HAND {hand_index + 1}  {hand_label or 'Unknown'}"
+    cv2.putText(frame, label_text, (x_offset + 12, y_start + 26),
+                cv2.FONT_HERSHEY_DUPLEX, 0.58, UI_THEME["accent"], 1)
 
     for i, (name, up) in enumerate(zip(names, fingers)):
-        color = (0, 255, 0) if up else (0, 0, 255)
+        color = UI_THEME["success"] if up else UI_THEME["danger"]
         status = "UP" if up else "DOWN"
-        cv2.putText(frame, f"{name}: {status}",
-                    (x_offset, y_start + 25 * (i + 1)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+        row_y = y_start + 56 + (i * 24)
+        cv2.putText(frame, f"{name:<6}", (x_offset + 12, row_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.53, UI_THEME["text_primary"], 1)
+        cv2.putText(frame, status, (x_offset + 150, row_y),
+                    cv2.FONT_HERSHEY_DUPLEX, 0.55, color, 2)
 
 
 def draw_gesture_label(frame, gesture, frame_width, frame_height):
     """Display the recognized gesture word prominently at the bottom center."""
     if not gesture:
         return
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 1.8
-    thickness = 4
+    font = cv2.FONT_HERSHEY_DUPLEX
+    font_scale = 1.35
+    thickness = 2
     (text_w, text_h), baseline = cv2.getTextSize(gesture, font, font_scale, thickness)
     x = (frame_width - text_w) // 2
-    y = frame_height - 30
-    # Dark background rectangle for readability
-    cv2.rectangle(frame,
-                  (x - 12, y - text_h - 12),
-                  (x + text_w + 12, y + baseline + 8),
-                  (0, 0, 0), cv2.FILLED)
-    cv2.putText(frame, gesture, (x, y), font, font_scale, (0, 255, 128), thickness)
+    y = frame_height - 36
+    draw_glass_panel(frame,
+                     x - 26, y - text_h - 20,
+                     x + text_w + 26, y + baseline + 14,
+                     UI_THEME["glass_alt"], alpha=0.62)
+    cv2.putText(frame, gesture, (x, y), font, font_scale, UI_THEME["success"], thickness)
 
 
 def draw_sentence(frame, sentence, frame_width):
@@ -383,29 +418,66 @@ def draw_sentence(frame, sentence, frame_width):
     if not sentence:
         return
     text = " ".join(sentence)
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.9
+    font = cv2.FONT_HERSHEY_DUPLEX
+    font_scale = 0.8
     thickness = 2
     (text_w, text_h), baseline = cv2.getTextSize(text, font, font_scale, thickness)
     x = max(10, (frame_width - text_w) // 2)
-    y = 60
-    cv2.rectangle(frame, (x - 8, y - text_h - 8), (x + text_w + 8, y + baseline + 6),
-                  (20, 20, 20), cv2.FILLED)
-    cv2.putText(frame, text, (x, y), font, font_scale, (255, 220, 50), thickness)
+    y = 46
+    draw_glass_panel(frame, x - 16, y - text_h - 12, x + text_w + 16, y + baseline + 10,
+                     UI_THEME["glass_alt"], alpha=0.6)
+    cv2.putText(frame, text, (x, y), font, font_scale, UI_THEME["warning"], thickness)
 
 
 def draw_hold_progress(frame, gesture, elapsed, hold_time, frame_width, frame_height):
     """Draw a progress bar showing how long the current gesture has been held."""
     if not gesture:
         return
-    bar_w = 300
-    bar_h = 12
+    bar_w = 360
+    bar_h = 14
     x = (frame_width - bar_w) // 2
-    y = frame_height - 80
+    y = frame_height - 92
     progress = min(elapsed / hold_time, 1.0)
-    cv2.rectangle(frame, (x, y), (x + bar_w, y + bar_h), (60, 60, 60), cv2.FILLED)
-    cv2.rectangle(frame, (x, y), (x + int(bar_w * progress), y + bar_h), (0, 200, 255), cv2.FILLED)
-    cv2.rectangle(frame, (x, y), (x + bar_w, y + bar_h), (180, 180, 180), 1)
+    draw_glass_panel(frame, x - 10, y - 28, x + bar_w + 10, y + bar_h + 12,
+                     UI_THEME["glass"], alpha=0.58)
+    cv2.putText(frame, "Hold to commit", (x, y - 8),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.48, UI_THEME["text_dim"], 1)
+    cv2.rectangle(frame, (x, y), (x + bar_w, y + bar_h), (52, 52, 52), cv2.FILLED)
+    cv2.rectangle(frame, (x, y), (x + int(bar_w * progress), y + bar_h), UI_THEME["accent"], cv2.FILLED)
+    cv2.rectangle(frame, (x, y), (x + bar_w, y + bar_h), (150, 150, 150), 1)
+
+
+def draw_header(frame, frame_width):
+    """Draw app title and controls hint at the top."""
+    draw_glass_panel(frame, 170, 10, frame_width - 170, 54, UI_THEME["glass_alt"], alpha=0.56)
+    cv2.putText(frame, "SIGN LANGUAGE DETECTION", (188, 39),
+                cv2.FONT_HERSHEY_DUPLEX, 0.7, UI_THEME["text_primary"], 1)
+    cv2.putText(frame, "Q Quit   C Clear   V Voice", (frame_width - 410, 39),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, UI_THEME["text_dim"], 1)
+
+
+def draw_stt_panel(frame, stt_enabled, stt_status, stt_text, frame_width, frame_height):
+    """Draw speech-to-text status and latest recognized text."""
+    panel_x1 = 220
+    panel_y1 = frame_height - 98
+    panel_x2 = frame_width - 14
+    panel_y2 = frame_height - 14
+    draw_glass_panel(frame, panel_x1, panel_y1, panel_x2, panel_y2, UI_THEME["glass_alt"], alpha=0.56)
+
+    status_label = "VOICE ON" if stt_enabled else "VOICE OFF"
+    status_color = UI_THEME["success"] if stt_enabled else UI_THEME["text_dim"]
+    cv2.putText(frame, status_label, (panel_x1 + 14, panel_y1 + 28),
+                cv2.FONT_HERSHEY_DUPLEX, 0.58, status_color, 1)
+
+    cv2.putText(frame, f"Status: {stt_status}", (panel_x1 + 150, panel_y1 + 28),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, UI_THEME["text_dim"], 1)
+
+    text = (stt_text or "(speech text will appear here)").strip()
+    max_chars = 80
+    if len(text) > max_chars:
+        text = "..." + text[-(max_chars - 3):]
+    cv2.putText(frame, text, (panel_x1 + 14, panel_y1 + 64),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, UI_THEME["warning"], 2)
 
 
 def main():
@@ -414,10 +486,14 @@ def main():
         print("Error: Cannot open webcam.")
         return
 
+    window_name = "Sign Language Studio"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
     tracker = HandTracker(max_hands=2, detection_confidence=0.7, tracking_confidence=0.7)
+    stt = SpeechToTextManager()
 
     prev_time = 0
 
@@ -449,6 +525,10 @@ def main():
         prev_time = curr_time
 
         draw_fps(frame, fps)
+        draw_header(frame, frame_width)
+
+        stt_text = stt.get_display_text()
+        stt_status = stt.get_status()
 
         # --- Gesture detection ---
         detected_gesture = ""
@@ -514,14 +594,26 @@ def main():
             draw_sentence(frame, sentence, frame_width)
 
         total_hands = len(tracker.results.hand_landmarks) if (tracker.results and tracker.results.hand_landmarks) else 0
-        cv2.putText(frame, f"Hands detected: {total_hands}", (10, frame_height - 15),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 2)
+        draw_glass_panel(frame, 12, frame_height - 48, 206, frame_height - 10,
+                         UI_THEME["glass"], alpha=0.55)
+        cv2.putText(frame, f"Hands: {total_hands}", (24, frame_height - 22),
+                    cv2.FONT_HERSHEY_DUPLEX, 0.6, UI_THEME["text_primary"], 1)
 
-        cv2.imshow("Hand Tracking - MediaPipe", frame)
+        draw_stt_panel(frame, stt.enabled, stt_status, stt_text, frame_width, frame_height)
 
-        if cv2.waitKey(1) & 0xFF == ord("q"):
+        cv2.imshow(window_name, frame)
+
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord("c"):
+            sentence = []
+            flash_sentence = ["[Cleared]"]
+            flash_until = curr_time + 1.5
+        if key == ord("v"):
+            stt.toggle()
+        if key == ord("q"):
             break
 
+    stt.stop()
     cap.release()
     cv2.destroyAllWindows()
     print("Hand Tracking stopped.")
