@@ -286,13 +286,13 @@ class HandTracker:
             return "Yes"
 
         if not T and I and M and R and not P:
-            return "Are"
+            return "don't understand"
 
         if not T and I and not M and not R and P:
             return "Thank You"
 
         if T and I and not M and not R and P:
-            return "I Love You"
+            return "understand"
 
         if not T and not I and M and not R and not P:
             if landmark_list and self.is_back_palm(landmark_list):
